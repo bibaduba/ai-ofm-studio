@@ -62,6 +62,12 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 db.exec(`
+  PRAGMA busy_timeout = 30000;
+  PRAGMA journal_mode = WAL;
+  PRAGMA foreign_keys = ON;
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS profiles (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
