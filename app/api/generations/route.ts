@@ -5,6 +5,7 @@ import {
   generateGeminiVideo,
   type GeminiSourceImage
 } from "@/app/lib/gemini";
+import { getCurrentUser } from "@/app/lib/auth";
 
 function escapeSvgText(value: string) {
   return value
@@ -70,6 +71,8 @@ function createMockImage(prompt: string, aspectRatio: string, resolution: string
 }
 
 export async function GET(request: Request) {
+  const user = getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const profileId = searchParams.get("profileId");
   const search = searchParams.get("search") || "";
@@ -79,6 +82,9 @@ export async function GET(request: Request) {
   if (!profileId) {
     return NextResponse.json({ error: "profileId is required." }, { status: 400 });
   }
+
+  const ownedProfile = db.prepare("SELECT id FROM profiles WHERE id = ? AND userId = ?").get(profileId, user.id);
+  if (!ownedProfile) return NextResponse.json({ error: "Profile not found." }, { status: 404 });
 
   const clauses = ["profileId = ?"];
   const values: Array<string | number> = [profileId];
@@ -106,6 +112,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const user = getCurrentUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await request.json();
     const profileId = String(body.profileId || "");
     const apiKey = String(body.apiKey || "");
@@ -124,6 +132,9 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    const ownedProfile = db.prepare("SELECT id FROM profiles WHERE id = ? AND userId = ?").get(profileId, user.id);
+    if (!ownedProfile) return NextResponse.json({ error: "Profile not found." }, { status: 404 });
 
     const imageData =
       mock && mediaType === "video"
@@ -201,14 +212,22 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const user = getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id, favorite } = await request.json();
 
   if (!id) {
     return NextResponse.json({ error: "id is required." }, { status: 400 });
   }
 
-  db.prepare("UPDATE generations SET favorite = ? WHERE id = ?").run(favorite ? 1 : 0, id);
-  const generation = db.prepare("SELECT * FROM generations WHERE id = ?").get(id) as
+  db.prepare(
+    `UPDATE generations SET favorite = ? WHERE id = ? AND profileId IN
+     (SELECT id FROM profiles WHERE userId = ?)`
+  ).run(favorite ? 1 : 0, id, user.id);
+  const generation = db.prepare(
+    `SELECT generations.* FROM generations JOIN profiles ON profiles.id = generations.profileId
+     WHERE generations.id = ? AND profiles.userId = ?`
+  ).get(id, user.id) as
     | GenerationRecord
     | undefined;
 
@@ -220,6 +239,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const user = getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -227,6 +248,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "id is required." }, { status: 400 });
   }
 
-  db.prepare("DELETE FROM generations WHERE id = ?").run(id);
+  db.prepare(
+    `DELETE FROM generations WHERE id = ? AND profileId IN
+     (SELECT id FROM profiles WHERE userId = ?)`
+  ).run(id, user.id);
   return NextResponse.json({ ok: true });
 }

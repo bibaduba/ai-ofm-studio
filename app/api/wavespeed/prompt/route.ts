@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/app/lib/auth";
 import { generateGeminiText, type GeminiSourceImage } from "@/app/lib/gemini";
 
 const SEEDREAM_SCENE_PROMPT = `You are an expert at creating complete image generation prompts for Seedream 4.5 AI model.
@@ -50,6 +51,7 @@ function dataUrlToSourceImage(dataUrl: string): GeminiSourceImage {
 
 export async function POST(request: Request) {
   try {
+    if (!getCurrentUser()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await request.json();
     const apiKey = String(body.apiKey || "").trim();
     const image = String(body.image || "");

@@ -11,6 +11,7 @@ import {
   startWavespeedMotionPrediction,
   startWavespeedPrediction
 } from "@/app/lib/wavespeed";
+import { getCurrentUser } from "@/app/lib/auth";
 
 function escapeSvgText(value: string) {
   return value
@@ -51,23 +52,26 @@ function normalizeStatus(value: string, hasOutputs = false) {
   return status || "running";
 }
 
-function getGeneration(id: string) {
+function getGeneration(id: string, userId: string) {
   return db
-    .prepare("SELECT * FROM wavespeed_generations WHERE id = ?")
-    .get(id) as WavespeedGenerationRecord | undefined;
+    .prepare("SELECT * FROM wavespeed_generations WHERE id = ? AND userId = ?")
+    .get(id, userId) as WavespeedGenerationRecord | undefined;
 }
 
 export async function GET() {
+  const user = getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const generations = db
-    .prepare("SELECT * FROM wavespeed_generations ORDER BY createdAt DESC LIMIT 50")
-    .all() as WavespeedGenerationRecord[];
+    .prepare("SELECT * FROM wavespeed_generations WHERE userId = ? ORDER BY createdAt DESC LIMIT 50")
+    .all(user.id) as WavespeedGenerationRecord[];
 
   return NextResponse.json(generations);
 }
 
 export async function POST(request: Request) {
   try {
-    
+    const user = getCurrentUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await request.json();
 
     const mock = Boolean(body.mock);
@@ -88,8 +92,8 @@ export async function POST(request: Request) {
 
     if (wavespeedModelId) {
       const savedModel = db
-        .prepare("SELECT * FROM wavespeed_models WHERE id = ?")
-        .get(wavespeedModelId) as WavespeedModelRecord | undefined;
+        .prepare("SELECT * FROM wavespeed_models WHERE id = ? AND userId = ?")
+        .get(wavespeedModelId, user.id) as WavespeedModelRecord | undefined;
       if (!savedModel) {
         return NextResponse.json({ error: "Saved Wavespeed model not found." }, { status: 404 });
       }
@@ -121,6 +125,7 @@ export async function POST(request: Request) {
         : [...faceReferences, ...bodyReferences, ...(sceneReference ? [sceneReference] : [])];
     const generation = {
       id: generationId,
+      userId: user.id,
       wavespeedModelId,
       mode,
       prompt,
@@ -138,10 +143,11 @@ export async function POST(request: Request) {
 
     db.prepare(
       `INSERT INTO wavespeed_generations
-        (id, wavespeedModelId, mode, prompt, faceReferences, bodyReferences, sceneReference, resultImages, status, predictionId, endpoint, error, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        (id, userId, wavespeedModelId, mode, prompt, faceReferences, bodyReferences, sceneReference, resultImages, status, predictionId, endpoint, error, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       generation.id,
+      generation.userId,
       generation.wavespeedModelId,
       generation.mode,
       generation.prompt,
@@ -223,7 +229,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(getGeneration(generation.id));
+    return NextResponse.json(getGeneration(generation.id, user.id));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Wavespeed generation failed." },
@@ -234,6 +240,8 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    const user = getCurrentUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await request.json();
     const id = String(body.id || "");
     const apiKey = String(body.apiKey || "");
@@ -242,7 +250,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "id is required." }, { status: 400 });
     }
 
-    const generation = getGeneration(id);
+    const generation = getGeneration(id, user.id);
     if (!generation) {
       return NextResponse.json({ error: "Generation not found." }, { status: 404 });
     }
@@ -263,7 +271,7 @@ export async function PATCH(request: Request) {
         timestamp,
         id
       );
-      return NextResponse.json(getGeneration(id));
+      return NextResponse.json(getGeneration(id, user.id));
     }
 
     const result = await checkWavespeedPrediction({
@@ -286,7 +294,7 @@ export async function PATCH(request: Request) {
       id
     );
 
-    return NextResponse.json(getGeneration(id));
+    return NextResponse.json(getGeneration(id, user.id));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Wavespeed status check failed." },
@@ -296,6 +304,8 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const user = getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
@@ -303,6 +313,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "id is required." }, { status: 400 });
   }
 
-  db.prepare("DELETE FROM wavespeed_generations WHERE id = ?").run(id);
+  db.prepare("DELETE FROM wavespeed_generations WHERE id = ? AND userId = ?").run(id, user.id);
   return NextResponse.json({ ok: true });
 }

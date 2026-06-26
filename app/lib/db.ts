@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 export type ProfileRecord = {
   id: string;
+  userId: string | null;
   name: string;
   createdAt: string;
   updatedAt: string;
@@ -25,6 +26,7 @@ export type GenerationRecord = {
 
 export type WavespeedModelRecord = {
   id: string;
+  userId: string | null;
   name: string;
   faceReferences: string;
   bodyReferences: string;
@@ -34,6 +36,7 @@ export type WavespeedModelRecord = {
 
 export type WavespeedGenerationRecord = {
   id: string;
+  userId: string | null;
   wavespeedModelId: string | null;
   mode: string;
   prompt: string;
@@ -68,8 +71,30 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    passwordHash TEXT NOT NULL,
+    passwordSalt TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    tokenHash TEXT NOT NULL UNIQUE,
+    expiresAt TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS sessions_token_idx ON sessions(tokenHash);
+  CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions(expiresAt);
+
   CREATE TABLE IF NOT EXISTS profiles (
     id TEXT PRIMARY KEY,
+    userId TEXT,
     name TEXT NOT NULL UNIQUE,
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL
@@ -95,6 +120,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS wavespeed_models (
     id TEXT PRIMARY KEY,
+    userId TEXT,
     name TEXT NOT NULL,
     faceReferences TEXT NOT NULL,
     bodyReferences TEXT NOT NULL,
@@ -104,6 +130,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS wavespeed_generations (
     id TEXT PRIMARY KEY,
+    userId TEXT,
     wavespeedModelId TEXT,
     mode TEXT NOT NULL,
     prompt TEXT NOT NULL,
@@ -124,6 +151,22 @@ db.exec(`
     ON wavespeed_generations(createdAt DESC);
 `);
 
+const profileColumns = db
+  .prepare("PRAGMA table_info(profiles)")
+  .all() as Array<{ name: string }>;
+
+if (!profileColumns.some((column) => column.name === "userId")) {
+  db.exec("ALTER TABLE profiles ADD COLUMN userId TEXT;");
+}
+
+const wavespeedModelColumns = db
+  .prepare("PRAGMA table_info(wavespeed_models)")
+  .all() as Array<{ name: string }>;
+
+if (!wavespeedModelColumns.some((column) => column.name === "userId")) {
+  db.exec("ALTER TABLE wavespeed_models ADD COLUMN userId TEXT;");
+}
+
 const generationColumns = db
   .prepare("PRAGMA table_info(generations)")
   .all() as Array<{ name: string }>;
@@ -135,6 +178,19 @@ if (!generationColumns.some((column) => column.name === "mediaType")) {
 const wavespeedGenerationColumns = db
   .prepare("PRAGMA table_info(wavespeed_generations)")
   .all() as Array<{ name: string }>;
+
+if (!wavespeedGenerationColumns.some((column) => column.name === "userId")) {
+  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN userId TEXT;");
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS profiles_user_updated_idx
+    ON profiles(userId, updatedAt DESC);
+  CREATE INDEX IF NOT EXISTS wavespeed_models_user_updated_idx
+    ON wavespeed_models(userId, updatedAt DESC);
+  CREATE INDEX IF NOT EXISTS wavespeed_generations_user_created_idx
+    ON wavespeed_generations(userId, createdAt DESC);
+`);
 
 if (
   wavespeedGenerationColumns.length > 0 &&

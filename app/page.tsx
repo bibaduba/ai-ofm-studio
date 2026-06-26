@@ -26,6 +26,7 @@ import {
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import styles from "./page.module.scss";
+import { AccountPanel } from "@/app/components/AccountPanel";
 
 type MediaType = "image" | "video";
 
@@ -819,6 +820,7 @@ export default function Home() {
                 </span>
               </div>
             )}
+            <AccountPanel />
           </section>
         </div>
       )}

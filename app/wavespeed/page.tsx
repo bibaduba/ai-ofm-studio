@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react"
 import styles from "./wavespeed.module.scss"
+import { AccountPanel } from "@/app/components/AccountPanel"
 
 type Tab = "model" | "scene" | "motion"
 
@@ -1275,6 +1276,7 @@ export default function WavespeedPage() {
               />
               <span>Demo mode без внешних API</span>
             </label>
+            <AccountPanel />
           </section>
         </div>
       )}

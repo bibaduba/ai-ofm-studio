@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listGeminiModels } from "@/app/lib/gemini";
+import { getCurrentUser } from "@/app/lib/auth";
 
 const IMAGE_MODEL_IDS = ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"];
 const VIDEO_MODEL_IDS = [
@@ -11,6 +12,7 @@ const VIDEO_MODEL_IDS = [
 
 export async function POST(request: Request) {
   try {
+    if (!getCurrentUser()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { apiKey } = await request.json();
     const trimmedKey = String(apiKey || "").trim();
 
