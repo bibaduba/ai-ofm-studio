@@ -52,25 +52,21 @@ export type WavespeedGenerationRecord = {
   updatedAt: string;
 };
 
-const dataDirectory = process.env.DATA_DIR || join(process.cwd(), "data");
-const dbPath = join(dataDirectory, "studio.db");
-mkdirSync(dirname(dbPath), { recursive: true });
-
 const globalForDb = globalThis as unknown as { sqliteDb?: DatabaseSync };
 
-export const db = globalForDb.sqliteDb ?? new DatabaseSync(dbPath);
+function initializeDatabase() {
+  if (globalForDb.sqliteDb) return globalForDb.sqliteDb;
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.sqliteDb = db;
-}
+  const dataDirectory = process.env.DATA_DIR || join(process.cwd(), "data");
+  const dbPath = join(dataDirectory, "studio.db");
+  mkdirSync(dirname(dbPath), { recursive: true });
 
-db.exec(`
-  PRAGMA busy_timeout = 30000;
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-`);
+  const database = new DatabaseSync(dbPath);
+  database.exec("PRAGMA busy_timeout = 30000;");
+  database.exec("PRAGMA journal_mode = WAL;");
+  database.exec("PRAGMA foreign_keys = ON;");
 
-db.exec(`
+  database.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -149,98 +145,110 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS wavespeed_generations_created_idx
     ON wavespeed_generations(createdAt DESC);
-`);
+  `);
 
-const profileColumns = db
-  .prepare("PRAGMA table_info(profiles)")
-  .all() as Array<{ name: string }>;
+  const profileColumns = database
+    .prepare("PRAGMA table_info(profiles)")
+    .all() as Array<{ name: string }>;
 
-if (!profileColumns.some((column) => column.name === "userId")) {
-  db.exec("ALTER TABLE profiles ADD COLUMN userId TEXT;");
+  if (!profileColumns.some((column) => column.name === "userId")) {
+    database.exec("ALTER TABLE profiles ADD COLUMN userId TEXT;");
+  }
+
+  const wavespeedModelColumns = database
+    .prepare("PRAGMA table_info(wavespeed_models)")
+    .all() as Array<{ name: string }>;
+
+  if (!wavespeedModelColumns.some((column) => column.name === "userId")) {
+    database.exec("ALTER TABLE wavespeed_models ADD COLUMN userId TEXT;");
+  }
+
+  const generationColumns = database
+    .prepare("PRAGMA table_info(generations)")
+    .all() as Array<{ name: string }>;
+
+  if (!generationColumns.some((column) => column.name === "mediaType")) {
+    database.exec("ALTER TABLE generations ADD COLUMN mediaType TEXT NOT NULL DEFAULT 'image';");
+  }
+
+  const wavespeedGenerationColumns = database
+    .prepare("PRAGMA table_info(wavespeed_generations)")
+    .all() as Array<{ name: string }>;
+
+  if (!wavespeedGenerationColumns.some((column) => column.name === "userId")) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN userId TEXT;");
+  }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS profiles_user_updated_idx
+      ON profiles(userId, updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS wavespeed_models_user_updated_idx
+      ON wavespeed_models(userId, updatedAt DESC);
+    CREATE INDEX IF NOT EXISTS wavespeed_generations_user_created_idx
+      ON wavespeed_generations(userId, createdAt DESC);
+  `);
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "faceReferences")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN faceReferences TEXT;");
+  }
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "bodyReferences")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN bodyReferences TEXT;");
+  }
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "status")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN status TEXT NOT NULL DEFAULT 'completed';");
+  }
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "predictionId")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN predictionId TEXT;");
+  }
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "endpoint")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN endpoint TEXT;");
+  }
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "error")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN error TEXT;");
+  }
+
+  if (
+    wavespeedGenerationColumns.length > 0 &&
+    !wavespeedGenerationColumns.some((column) => column.name === "updatedAt")
+  ) {
+    database.exec("ALTER TABLE wavespeed_generations ADD COLUMN updatedAt TEXT NOT NULL DEFAULT '';");
+    database.exec("UPDATE wavespeed_generations SET updatedAt = createdAt WHERE updatedAt = '';");
+  }
+
+  globalForDb.sqliteDb = database;
+  return database;
 }
 
-const wavespeedModelColumns = db
-  .prepare("PRAGMA table_info(wavespeed_models)")
-  .all() as Array<{ name: string }>;
-
-if (!wavespeedModelColumns.some((column) => column.name === "userId")) {
-  db.exec("ALTER TABLE wavespeed_models ADD COLUMN userId TEXT;");
-}
-
-const generationColumns = db
-  .prepare("PRAGMA table_info(generations)")
-  .all() as Array<{ name: string }>;
-
-if (!generationColumns.some((column) => column.name === "mediaType")) {
-  db.exec("ALTER TABLE generations ADD COLUMN mediaType TEXT NOT NULL DEFAULT 'image';");
-}
-
-const wavespeedGenerationColumns = db
-  .prepare("PRAGMA table_info(wavespeed_generations)")
-  .all() as Array<{ name: string }>;
-
-if (!wavespeedGenerationColumns.some((column) => column.name === "userId")) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN userId TEXT;");
-}
-
-db.exec(`
-  CREATE INDEX IF NOT EXISTS profiles_user_updated_idx
-    ON profiles(userId, updatedAt DESC);
-  CREATE INDEX IF NOT EXISTS wavespeed_models_user_updated_idx
-    ON wavespeed_models(userId, updatedAt DESC);
-  CREATE INDEX IF NOT EXISTS wavespeed_generations_user_created_idx
-    ON wavespeed_generations(userId, createdAt DESC);
-`);
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "faceReferences")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN faceReferences TEXT;");
-}
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "bodyReferences")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN bodyReferences TEXT;");
-}
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "status")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN status TEXT NOT NULL DEFAULT 'completed';");
-}
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "predictionId")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN predictionId TEXT;");
-}
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "endpoint")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN endpoint TEXT;");
-}
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "error")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN error TEXT;");
-}
-
-if (
-  wavespeedGenerationColumns.length > 0 &&
-  !wavespeedGenerationColumns.some((column) => column.name === "updatedAt")
-) {
-  db.exec("ALTER TABLE wavespeed_generations ADD COLUMN updatedAt TEXT NOT NULL DEFAULT '';");
-  db.exec("UPDATE wavespeed_generations SET updatedAt = createdAt WHERE updatedAt = '';");
-}
+export const db = new Proxy({} as DatabaseSync, {
+  get(_target, property) {
+    const database = initializeDatabase();
+    const value = Reflect.get(database, property);
+    return typeof value === "function" ? value.bind(database) : value;
+  }
+});
 
 export function createId() {
   return crypto.randomUUID();
