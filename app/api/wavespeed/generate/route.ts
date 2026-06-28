@@ -12,6 +12,7 @@ import {
   startWavespeedPrediction
 } from "@/app/lib/wavespeed";
 import { getCurrentUser } from "@/app/lib/auth";
+import { deletePersistedMedia, persistWavespeedOutputs } from "@/app/lib/media-storage";
 
 function escapeSvgText(value: string) {
   return value
@@ -58,12 +59,35 @@ function getGeneration(id: string, userId: string) {
     .get(id, userId) as WavespeedGenerationRecord | undefined;
 }
 
+function resultUrls(generation: WavespeedGenerationRecord) {
+  try {
+    const parsed = JSON.parse(generation.resultImages);
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function GET() {
   const user = getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const generations = db
     .prepare("SELECT * FROM wavespeed_generations WHERE userId = ? ORDER BY createdAt DESC LIMIT 50")
     .all(user.id) as WavespeedGenerationRecord[];
+
+  const legacyRemoteGenerations = generations
+    .filter((generation) => generation.status === "completed" && resultUrls(generation).some((url) => /^https?:\/\//i.test(url)))
+    .slice(0, 12);
+
+  await Promise.all(legacyRemoteGenerations.map(async (generation) => {
+    const original = resultUrls(generation);
+    const persisted = await persistWavespeedOutputs(user.id, generation.id, original);
+    if (persisted.some((url, index) => url !== original[index])) {
+      generation.resultImages = JSON.stringify(persisted);
+      db.prepare("UPDATE wavespeed_generations SET resultImages = ?, updatedAt = ? WHERE id = ? AND userId = ?")
+        .run(generation.resultImages, now(), generation.id, user.id);
+    }
+  }));
 
   return NextResponse.json(generations);
 }
@@ -186,6 +210,9 @@ export async function POST(request: Request) {
           keepOriginalSound
         });
         const status = normalizeStatus(prediction.status, prediction.outputs.length > 0);
+        const persistedOutputs = prediction.outputs.length > 0
+          ? await persistWavespeedOutputs(user.id, generation.id, prediction.outputs)
+          : prediction.outputs;
         db.prepare(
           `UPDATE wavespeed_generations
            SET status = ?, predictionId = ?, resultImages = ?, error = ?, updatedAt = ?
@@ -193,7 +220,7 @@ export async function POST(request: Request) {
         ).run(
           status,
           prediction.id || null,
-          JSON.stringify(prediction.outputs),
+          JSON.stringify(persistedOutputs),
           status === "failed" ? "Wavespeed provider rejected the motion request. Check image/video and prompt." : null,
           now(),
           generation.id
@@ -207,6 +234,9 @@ export async function POST(request: Request) {
           count
         });
         const status = normalizeStatus(prediction.status, prediction.outputs.length > 0);
+        const persistedOutputs = prediction.outputs.length > 0
+          ? await persistWavespeedOutputs(user.id, generation.id, prediction.outputs)
+          : prediction.outputs;
         db.prepare(
           `UPDATE wavespeed_generations
            SET status = ?, predictionId = ?, resultImages = ?, error = ?, updatedAt = ?
@@ -214,7 +244,7 @@ export async function POST(request: Request) {
         ).run(
           status,
           prediction.id || null,
-          JSON.stringify(prediction.outputs),
+          JSON.stringify(persistedOutputs),
           status === "failed" ? "Wavespeed provider rejected the request. Check images and prompt." : null,
           now(),
           generation.id
@@ -281,6 +311,9 @@ export async function PATCH(request: Request) {
     });
     const status = normalizeStatus(result.status, result.outputs.length > 0);
     const timestamp = now();
+    const persistedOutputs = result.outputs.length > 0
+      ? await persistWavespeedOutputs(user.id, generation.id, result.outputs)
+      : result.outputs;
 
     db.prepare(
       `UPDATE wavespeed_generations
@@ -288,7 +321,7 @@ export async function PATCH(request: Request) {
        WHERE id = ?`
     ).run(
       status,
-      result.outputs.length > 0 ? JSON.stringify(result.outputs) : generation.resultImages,
+      persistedOutputs.length > 0 ? JSON.stringify(persistedOutputs) : generation.resultImages,
       status === "failed" ? result.error || "Wavespeed provider rejected the request." : null,
       timestamp,
       id
@@ -313,6 +346,10 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "id is required." }, { status: 400 });
   }
 
+  const generation = getGeneration(id, user.id);
+  if (!generation) return NextResponse.json({ error: "Generation not found." }, { status: 404 });
+
   db.prepare("DELETE FROM wavespeed_generations WHERE id = ? AND userId = ?").run(id, user.id);
+  await deletePersistedMedia(user.id, resultUrls(generation));
   return NextResponse.json({ ok: true });
 }

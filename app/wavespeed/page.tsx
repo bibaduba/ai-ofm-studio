@@ -532,8 +532,18 @@ export default function WavespeedPage() {
   }
 
   async function downloadImage(imageUrl: string, filename: string) {
+    if (imageUrl.startsWith("expired:")) {
+      showToast({
+        type: "error",
+        title: "Output expired",
+        message: "WaveSpeed уже удалил этот временный файл. Его нужно сгенерировать повторно.",
+      })
+      return
+    }
     const href = imageUrl.startsWith("data:")
       ? imageUrl
+      : imageUrl.startsWith("/api/media/")
+        ? imageUrl
       : `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`
     const response = await fetch(href)
     const blob = await response.blob()
@@ -1446,10 +1456,25 @@ function MediaPreview({
   alt: string
   controls?: boolean
 }) {
+  const [failed, setFailed] = useState(src.startsWith("expired:"))
+
+  useEffect(() => setFailed(src.startsWith("expired:")), [src])
+
+  if (failed) {
+    return (
+      <span className={styles.mediaExpired}>
+        <AlertTriangle size={22} />
+        <strong>Output expired</strong>
+        <small>WaveSpeed удалил временный файл</small>
+      </span>
+    )
+  }
+
   if (isVideoMedia(src)) {
     return (
       <video
         src={src}
+        onError={() => setFailed(true)}
         controls={controls}
         muted={!controls}
         playsInline
@@ -1458,7 +1483,7 @@ function MediaPreview({
     )
   }
 
-  return <img src={src} alt={alt} />
+  return <img src={src} alt={alt} onError={() => setFailed(true)} />
 }
 
 function ReferenceUpload({

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import { db } from "@/app/lib/db";
+import { mediaAsDataUrl } from "@/app/lib/media-storage";
 
 export async function GET() {
   const user = getCurrentUser();
@@ -17,12 +18,26 @@ export async function GET() {
   ).all(user.id);
   const wavespeedGenerations = db.prepare(
     "SELECT * FROM wavespeed_generations WHERE userId = ? ORDER BY createdAt"
-  ).all(user.id);
+  ).all(user.id) as Array<Record<string, unknown>>;
+
+  const portableWavespeedGenerations = await Promise.all(wavespeedGenerations.map(async (generation) => {
+    let outputs: string[] = [];
+    try {
+      const parsed = JSON.parse(String(generation.resultImages || "[]"));
+      if (Array.isArray(parsed)) outputs = parsed.filter((value): value is string => typeof value === "string");
+    } catch {
+      outputs = [];
+    }
+    return {
+      ...generation,
+      resultImages: JSON.stringify(await Promise.all(outputs.map((source) => mediaAsDataUrl(user.id, source))))
+    };
+  }));
 
   return NextResponse.json({
     version: 1,
     exportedAt: new Date().toISOString(),
     owner: user.username,
-    data: { profiles, generations, wavespeedModels, wavespeedGenerations }
+    data: { profiles, generations, wavespeedModels, wavespeedGenerations: portableWavespeedGenerations }
   });
 }
