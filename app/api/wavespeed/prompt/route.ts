@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/app/lib/auth";
-import { generateGeminiText, type GeminiSourceImage } from "@/app/lib/gemini";
+import { NextResponse } from "next/server"
+import { getCurrentUser } from "@/app/lib/auth"
+import { generateGeminiText, type GeminiSourceImage } from "@/app/lib/gemini"
 
 const SEEDREAM_SCENE_PROMPT = `You are an expert at creating complete image generation prompts for Seedream 4.5 AI model.
 
@@ -42,41 +42,53 @@ CRITICAL RULES:
 - Be precise about pose and body position
 - Focus on EVERYTHING visible except facial/hair features
 
-Output ONLY the formatted prompt, nothing else.`;
+Output ONLY the formatted prompt, nothing else.`
 
 function dataUrlToSourceImage(dataUrl: string): GeminiSourceImage {
-  const mimeType = dataUrl.match(/^data:([^;]+);base64,/)?.[1] || "image/png";
-  return { dataUrl, mimeType };
+  const mimeType = dataUrl.match(/^data:([^;]+);base64,/)?.[1] || "image/png"
+  return { dataUrl, mimeType }
 }
 
 export async function POST(request: Request) {
   try {
-    if (!getCurrentUser()) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const body = await request.json();
-    const apiKey = String(body.apiKey || "").trim();
-    const image = String(body.image || "");
-    const model = String(body.model || "gemini-2.5-flash");
+    if (!getCurrentUser())
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const body = await request.json()
+    const apiKey = String(body.apiKey || "").trim()
+    const image = String(body.image || "")
+    const model = String(body.model || "gemini-2.5-flash")
 
     if (!apiKey) {
-      return NextResponse.json({ error: "Gemini API key is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Gemini API key is required." },
+        { status: 400 },
+      )
     }
 
     if (!image.startsWith("data:image/")) {
-      return NextResponse.json({ error: "Scene reference image is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Scene reference image is required." },
+        { status: 400 },
+      )
     }
 
     const prompt = await generateGeminiText({
       apiKey,
       model,
       prompt: SEEDREAM_SCENE_PROMPT,
-      sourceImages: [dataUrlToSourceImage(image)]
-    });
+      sourceImages: [dataUrlToSourceImage(image)],
+    })
 
-    return NextResponse.json({ prompt });
+    return NextResponse.json({ prompt })
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Gemini prompt generation failed." },
-      { status: 500 }
-    );
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Gemini prompt generation failed.",
+      },
+      { status: 500 },
+    )
   }
 }

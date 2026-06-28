@@ -1,0 +1,69 @@
+.tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  width: 100%;
+  max-width: 1720px;
+  margin: 0 auto 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+
+  position: relative;
+}
+.tabs button {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+
+  z-index: 1;
+}
+
+.label {
+  color: var(--muted);
+  font-weight: 900;
+  position: relative;
+  z-index: 2;
+  margin: 0;
+
+  &.active {
+    color: var(--button-fg);
+  }
+}
+
+@media (max-width: 720px) {
+  .tabs {
+    display: grid;
+  }
+}
+
+.zone_wrapper {
+  position: absolute;
+  display: flex;
+  align-items: center;
+
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.active_zone {
+  background: var(--button-bg);
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  // max-width: 442px;
+  z-index: 0;
+
+  transition: 0.3s;
+
+  opacity: 0;
+
+  &:first-child {
+    opacity: 1;
+  }
+}
