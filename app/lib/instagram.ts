@@ -36,11 +36,14 @@ export type ManagedInstagramAccount = InstagramProfile & {
 export function instagramConfig(origin?: string) {
   const appId = process.env.INSTAGRAM_APP_ID || ""
   const appSecret = process.env.INSTAGRAM_APP_SECRET || ""
+  const facebookLoginConfigId =
+    process.env.INSTAGRAM_FACEBOOK_LOGIN_CONFIG_ID || ""
   const appUrl = (process.env.APP_URL || origin || "").replace(/\/$/, "")
   const encryptionSecret = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY || ""
   const missing = [
     !appId && "INSTAGRAM_APP_ID",
     !appSecret && "INSTAGRAM_APP_SECRET",
+    !facebookLoginConfigId && "INSTAGRAM_FACEBOOK_LOGIN_CONFIG_ID",
     !encryptionSecret && "INSTAGRAM_TOKEN_ENCRYPTION_KEY",
     !appUrl && "APP_URL",
   ].filter(Boolean)
@@ -51,6 +54,7 @@ export function instagramConfig(origin?: string) {
   return {
     appId,
     appSecret,
+    facebookLoginConfigId,
     appUrl,
     redirectUri: `${appUrl}/api/instagram/oauth/callback`,
   }

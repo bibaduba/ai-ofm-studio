@@ -41,10 +41,8 @@ export async function GET(request: Request) {
     authorizeUrl.searchParams.set("client_id", config.appId)
     authorizeUrl.searchParams.set("redirect_uri", config.redirectUri)
     authorizeUrl.searchParams.set("response_type", "code")
-    authorizeUrl.searchParams.set(
-      "scope",
-      "pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights",
-    )
+    authorizeUrl.searchParams.set("config_id", config.facebookLoginConfigId)
+    authorizeUrl.searchParams.set("override_default_response_type", "true")
     authorizeUrl.searchParams.set("state", state)
     authorizeUrl.searchParams.set("auth_type", "rerequest")
 
