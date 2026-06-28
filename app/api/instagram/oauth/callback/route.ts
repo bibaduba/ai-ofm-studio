@@ -5,6 +5,7 @@ import {
   encryptInstagramToken,
   exchangeFacebookCode,
   getManagedInstagramAccounts,
+  instagramPublicUrl,
   saveInstagramConnection,
 } from "@/app/lib/instagram"
 
@@ -18,7 +19,7 @@ type OAuthState = {
 }
 
 function dashboardRedirect(request: Request, status: string, message?: string) {
-  const url = new URL("/dashboard", request.url)
+  const url = instagramPublicUrl("/dashboard", request)
   url.searchParams.set("instagram", status)
   if (message) url.searchParams.set("message", message)
   return NextResponse.redirect(url)
@@ -26,7 +27,8 @@ function dashboardRedirect(request: Request, status: string, message?: string) {
 
 export async function GET(request: Request) {
   const user = getCurrentUser()
-  if (!user) return NextResponse.redirect(new URL("/login", request.url))
+  if (!user)
+    return NextResponse.redirect(instagramPublicUrl("/login", request))
 
   const url = new URL(request.url)
   const providerError = url.searchParams.get("error")
@@ -62,15 +64,22 @@ export async function GET(request: Request) {
 
   try {
     const token = await exchangeFacebookCode(code, url.origin)
-    const accounts = await getManagedInstagramAccounts(token.accessToken)
+    const managedAccounts = await getManagedInstagramAccounts(
+      token.accessToken,
+    )
+    const accounts = managedAccounts.accounts
     if (!accounts.length) {
       db.prepare("DELETE FROM instagram_oauth_states WHERE state = ?").run(
         state.state,
       )
       return dashboardRedirect(
         request,
-        "no-instagram-account",
-        "No professional Instagram account linked to an accessible Facebook Page was found.",
+        managedAccounts.pageCount
+          ? "no-instagram-account"
+          : "no-facebook-page",
+        managedAccounts.pageCount
+          ? "Meta returned Facebook Pages, but none has a linked professional Instagram account. Check Page Settings > Linked accounts."
+          : "Meta returned no Facebook Pages. Reconnect and select the Page asset, then verify pages_show_list and full Page access.",
       )
     }
 
@@ -84,7 +93,7 @@ export async function GET(request: Request) {
       db.prepare("DELETE FROM instagram_oauth_states WHERE state = ?").run(
         state.state,
       )
-      const redirect = new URL("/dashboard", request.url)
+      const redirect = instagramPublicUrl("/dashboard", request)
       redirect.searchParams.set("instagram", "connected")
       redirect.searchParams.set("model", model.id)
       return NextResponse.redirect(redirect)
@@ -101,7 +110,10 @@ export async function GET(request: Request) {
       state.state,
       user.id,
     )
-    const selectionUrl = new URL("/dashboard/instagram/select", request.url)
+    const selectionUrl = instagramPublicUrl(
+      "/dashboard/instagram/select",
+      request,
+    )
     selectionUrl.searchParams.set("state", state.state)
     return NextResponse.redirect(selectionUrl)
   } catch (error) {

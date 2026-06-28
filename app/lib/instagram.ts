@@ -60,6 +60,17 @@ export function instagramConfig(origin?: string) {
   }
 }
 
+export function instagramPublicUrl(path: string, request: Request) {
+  const configuredUrl = (process.env.APP_URL || "").replace(/\/$/, "")
+  if (configuredUrl) return new URL(path, `${configuredUrl}/`)
+
+  const requestUrl = new URL(request.url)
+  const host = request.headers.get("x-forwarded-host") || requestUrl.host
+  const protocol =
+    request.headers.get("x-forwarded-proto") || requestUrl.protocol.slice(0, -1)
+  return new URL(path, `${protocol}://${host}`)
+}
+
 function encryptionKey() {
   const secret = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY
   if (!secret) throw new Error("Instagram token encryption key is missing.")
@@ -188,7 +199,7 @@ export async function getManagedInstagramAccounts(userAccessToken: string) {
       limit: 100,
     },
   )
-  return response.data
+  const accounts = response.data
     .filter(
       (page): page is Page & { instagram_business_account: InstagramProfile } =>
         Boolean(page.instagram_business_account?.id),
@@ -199,6 +210,7 @@ export async function getManagedInstagramAccounts(userAccessToken: string) {
       facebookPageName: page.name,
       pageAccessToken: page.access_token,
     }))
+  return { accounts, pageCount: response.data.length }
 }
 
 export async function getInstagramProfile(

@@ -2,11 +2,12 @@ import { randomBytes } from "node:crypto"
 import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/auth"
 import { db, now, type WavespeedModelRecord } from "@/app/lib/db"
-import { instagramConfig } from "@/app/lib/instagram"
+import { instagramConfig, instagramPublicUrl } from "@/app/lib/instagram"
 
 export async function GET(request: Request) {
   const user = getCurrentUser()
-  if (!user) return NextResponse.redirect(new URL("/login", request.url))
+  if (!user)
+    return NextResponse.redirect(instagramPublicUrl("/login", request))
 
   const requestUrl = new URL(request.url)
   const modelId = requestUrl.searchParams.get("modelId") || ""
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
 
   if (!model) {
     return NextResponse.redirect(
-      new URL("/dashboard?instagram=missing-model", request.url),
+      instagramPublicUrl("/dashboard?instagram=missing-model", request),
     )
   }
 
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
 
     return NextResponse.redirect(authorizeUrl)
   } catch (error) {
-    const redirect = new URL("/dashboard", request.url)
+    const redirect = instagramPublicUrl("/dashboard", request)
     redirect.searchParams.set("instagram", "config-error")
     redirect.searchParams.set(
       "message",
