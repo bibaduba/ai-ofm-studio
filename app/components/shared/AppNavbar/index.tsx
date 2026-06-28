@@ -7,10 +7,10 @@ import styles from "./index.module.scss"
 
 type AppNavbarProps = {
   subtitle: string
-  activeApp: "gemini" | "wavespeed"
+  activeApp: "gemini" | "wavespeed" | "dashboard"
   theme: "light" | "dark"
   onToggleTheme: () => void
-  onOpenSettings: () => void
+  onOpenSettings?: () => void
   children?: ReactNode
 }
 
@@ -45,14 +45,16 @@ export function AppNavbar({
         {theme === "dark" ? <Moon size={17} /> : <Sun size={17} />}
         <span />
       </button>
-      <button
-        className={styles.settingsButton}
-        type='button'
-        onClick={onOpenSettings}
-        aria-label='Settings'
-      >
-        <Settings2 size={19} />
-      </button>
+      {onOpenSettings && (
+        <button
+          className={styles.settingsButton}
+          type='button'
+          onClick={onOpenSettings}
+          aria-label='Settings'
+        >
+          <Settings2 size={19} />
+        </button>
+      )}
       <div className={styles.appSwitch}>
         <Link className={activeApp === "gemini" ? styles.active : ""} href='/'>
           Gemini
@@ -62,6 +64,12 @@ export function AppNavbar({
           href='/wavespeed'
         >
           Wavespeed
+        </Link>
+        <Link
+          className={activeApp === "dashboard" ? styles.active : ""}
+          href='/dashboard'
+        >
+          Dashboard
         </Link>
       </div>
     </nav>

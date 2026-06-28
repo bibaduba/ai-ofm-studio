@@ -53,6 +53,20 @@ export type WavespeedGenerationRecord = {
   updatedAt: string
 }
 
+export type InstagramConnectionRecord = {
+  id: string
+  userId: string
+  wavespeedModelId: string
+  instagramUserId: string
+  username: string
+  displayName: string | null
+  profilePictureUrl: string | null
+  accessTokenEncrypted: string
+  tokenExpiresAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 const globalForDb = globalThis as unknown as { sqliteDb?: DatabaseSync }
 
 function initializeDatabase() {
@@ -147,6 +161,38 @@ function initializeDatabase() {
 
   CREATE INDEX IF NOT EXISTS wavespeed_generations_created_idx
     ON wavespeed_generations(createdAt DESC);
+
+  CREATE TABLE IF NOT EXISTS instagram_connections (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    wavespeedModelId TEXT NOT NULL UNIQUE,
+    instagramUserId TEXT NOT NULL,
+    username TEXT NOT NULL,
+    displayName TEXT,
+    profilePictureUrl TEXT,
+    accessTokenEncrypted TEXT NOT NULL,
+    tokenExpiresAt TEXT,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    UNIQUE(userId, instagramUserId),
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (wavespeedModelId) REFERENCES wavespeed_models(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS instagram_oauth_states (
+    state TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    wavespeedModelId TEXT NOT NULL,
+    expiresAt TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (wavespeedModelId) REFERENCES wavespeed_models(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS instagram_connections_user_idx
+    ON instagram_connections(userId, updatedAt DESC);
+  CREATE INDEX IF NOT EXISTS instagram_oauth_states_expires_idx
+    ON instagram_oauth_states(expiresAt);
   `)
 
   const profileColumns = database

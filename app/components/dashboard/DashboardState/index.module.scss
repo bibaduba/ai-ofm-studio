@@ -1,0 +1,53 @@
+.state {
+  display: flex;
+  flex: 1;
+  min-height: 360px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 34px;
+  border: 1px dashed var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  text-align: center;
+}
+.state > span {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--pink-soft);
+  color: var(--pink-strong);
+}
+.state h2 {
+  margin: 16px 0 0;
+  font-size: 18px;
+}
+.state p {
+  max-width: 480px;
+  margin: 7px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.state a,
+.state button {
+  display: inline-flex;
+  gap: 7px;
+  height: 38px;
+  align-items: center;
+  margin-top: 18px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--button-bg);
+  color: var(--button-fg);
+  text-decoration: none;
+  font-weight: 800;
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
