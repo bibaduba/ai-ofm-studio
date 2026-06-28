@@ -1,22 +1,18 @@
 import { NextResponse } from "next/server"
 import { getCurrentUser } from "@/app/lib/auth"
-import {
-  createId,
-  db,
-  now,
-  type InstagramConnectionRecord,
-  type WavespeedModelRecord,
-} from "@/app/lib/db"
+import { db, now, type WavespeedModelRecord } from "@/app/lib/db"
 import {
   encryptInstagramToken,
-  exchangeInstagramCode,
-  getInstagramProfile,
+  exchangeFacebookCode,
+  getManagedInstagramAccounts,
+  saveInstagramConnection,
 } from "@/app/lib/instagram"
 
 type OAuthState = {
   state: string
   userId: string
   wavespeedModelId: string
+  payloadEncrypted: string | null
   expiresAt: string
   createdAt: string
 }
@@ -59,66 +55,59 @@ export async function GET(request: Request) {
     return dashboardRedirect(request, "invalid-state")
   }
 
-  db.prepare("DELETE FROM instagram_oauth_states WHERE state = ?").run(
-    state.state,
-  )
   const model = db
     .prepare("SELECT * FROM wavespeed_models WHERE id = ? AND userId = ?")
     .get(state.wavespeedModelId, user.id) as WavespeedModelRecord | undefined
   if (!model) return dashboardRedirect(request, "missing-model")
 
   try {
-    const token = await exchangeInstagramCode(code, url.origin)
-    const profile = await getInstagramProfile(token.accessToken)
-    const instagramUserId = String(
-      profile.user_id || token.instagramUserId || profile.id,
-    )
-    const timestamp = now()
-    const existing = db
-      .prepare(
-        `SELECT * FROM instagram_connections
-         WHERE userId = ? AND (wavespeedModelId = ? OR instagramUserId = ?)
-         ORDER BY updatedAt DESC LIMIT 1`,
+    const token = await exchangeFacebookCode(code, url.origin)
+    const accounts = await getManagedInstagramAccounts(token.accessToken)
+    if (!accounts.length) {
+      db.prepare("DELETE FROM instagram_oauth_states WHERE state = ?").run(
+        state.state,
       )
-      .get(user.id, model.id, instagramUserId) as
-      | InstagramConnectionRecord
-      | undefined
-
-    db.exec("BEGIN IMMEDIATE;")
-    try {
-      db.prepare(
-        `DELETE FROM instagram_connections
-         WHERE userId = ? AND (wavespeedModelId = ? OR instagramUserId = ?)`,
-      ).run(user.id, model.id, instagramUserId)
-      db.prepare(
-        `INSERT INTO instagram_connections
-         (id, userId, wavespeedModelId, instagramUserId, username, displayName,
-          profilePictureUrl, accessTokenEncrypted, tokenExpiresAt, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        existing?.id || createId(),
-        user.id,
-        model.id,
-        instagramUserId,
-        profile.username,
-        profile.name || null,
-        profile.profile_picture_url || null,
-        encryptInstagramToken(token.accessToken),
-        token.expiresAt,
-        existing?.createdAt || timestamp,
-        timestamp,
+      return dashboardRedirect(
+        request,
+        "no-instagram-account",
+        "No professional Instagram account linked to an accessible Facebook Page was found.",
       )
-      db.exec("COMMIT;")
-    } catch (error) {
-      db.exec("ROLLBACK;")
-      throw error
     }
 
-    const redirect = new URL("/dashboard", request.url)
-    redirect.searchParams.set("instagram", "connected")
-    redirect.searchParams.set("model", model.id)
-    return NextResponse.redirect(redirect)
+    if (accounts.length === 1) {
+      saveInstagramConnection({
+        userId: user.id,
+        wavespeedModelId: model.id,
+        account: accounts[0],
+        tokenExpiresAt: token.expiresAt,
+      })
+      db.prepare("DELETE FROM instagram_oauth_states WHERE state = ?").run(
+        state.state,
+      )
+      const redirect = new URL("/dashboard", request.url)
+      redirect.searchParams.set("instagram", "connected")
+      redirect.searchParams.set("model", model.id)
+      return NextResponse.redirect(redirect)
+    }
+
+    db.prepare(
+      `UPDATE instagram_oauth_states
+       SET payloadEncrypted = ?, expiresAt = ? WHERE state = ? AND userId = ?`,
+    ).run(
+      encryptInstagramToken(
+        JSON.stringify({ accounts, tokenExpiresAt: token.expiresAt }),
+      ),
+      new Date(Date.now() + 10 * 60000).toISOString(),
+      state.state,
+      user.id,
+    )
+    const selectionUrl = new URL("/dashboard/instagram/select", request.url)
+    selectionUrl.searchParams.set("state", state.state)
+    return NextResponse.redirect(selectionUrl)
   } catch (error) {
+    db.prepare("DELETE FROM instagram_oauth_states WHERE state = ?").run(
+      state.state,
+    )
     return dashboardRedirect(
       request,
       "oauth-error",

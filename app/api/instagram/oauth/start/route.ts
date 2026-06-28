@@ -35,17 +35,18 @@ export async function GET(request: Request) {
        VALUES (?, ?, ?, ?, ?)`,
     ).run(state, user.id, model.id, expiresAt, createdAt)
 
-    const authorizeUrl = new URL("https://www.instagram.com/oauth/authorize")
+    const authorizeUrl = new URL(
+      `https://www.facebook.com/${process.env.INSTAGRAM_GRAPH_VERSION || "v25.0"}/dialog/oauth`,
+    )
     authorizeUrl.searchParams.set("client_id", config.appId)
     authorizeUrl.searchParams.set("redirect_uri", config.redirectUri)
     authorizeUrl.searchParams.set("response_type", "code")
     authorizeUrl.searchParams.set(
       "scope",
-      "instagram_business_basic,instagram_business_manage_insights",
+      "pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights",
     )
     authorizeUrl.searchParams.set("state", state)
-    authorizeUrl.searchParams.set("enable_fb_login", "0")
-    authorizeUrl.searchParams.set("force_authentication", "1")
+    authorizeUrl.searchParams.set("auth_type", "rerequest")
 
     return NextResponse.redirect(authorizeUrl)
   } catch (error) {

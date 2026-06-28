@@ -58,6 +58,7 @@ export type InstagramConnectionRecord = {
   userId: string
   wavespeedModelId: string
   instagramUserId: string
+  facebookPageId: string | null
   username: string
   displayName: string | null
   profilePictureUrl: string | null
@@ -167,6 +168,7 @@ function initializeDatabase() {
     userId TEXT NOT NULL,
     wavespeedModelId TEXT NOT NULL UNIQUE,
     instagramUserId TEXT NOT NULL,
+    facebookPageId TEXT,
     username TEXT NOT NULL,
     displayName TEXT,
     profilePictureUrl TEXT,
@@ -183,6 +185,7 @@ function initializeDatabase() {
     state TEXT PRIMARY KEY,
     userId TEXT NOT NULL,
     wavespeedModelId TEXT NOT NULL,
+    payloadEncrypted TEXT,
     expiresAt TEXT NOT NULL,
     createdAt TEXT NOT NULL,
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE,
@@ -209,6 +212,32 @@ function initializeDatabase() {
 
   if (!wavespeedModelColumns.some((column) => column.name === "userId")) {
     database.exec("ALTER TABLE wavespeed_models ADD COLUMN userId TEXT;")
+  }
+
+  const instagramConnectionColumns = database
+    .prepare("PRAGMA table_info(instagram_connections)")
+    .all() as Array<{ name: string }>
+  if (
+    !instagramConnectionColumns.some(
+      (column) => column.name === "facebookPageId",
+    )
+  ) {
+    database.exec(
+      "ALTER TABLE instagram_connections ADD COLUMN facebookPageId TEXT;",
+    )
+  }
+
+  const instagramOAuthStateColumns = database
+    .prepare("PRAGMA table_info(instagram_oauth_states)")
+    .all() as Array<{ name: string }>
+  if (
+    !instagramOAuthStateColumns.some(
+      (column) => column.name === "payloadEncrypted",
+    )
+  ) {
+    database.exec(
+      "ALTER TABLE instagram_oauth_states ADD COLUMN payloadEncrypted TEXT;",
+    )
   }
 
   const generationColumns = database

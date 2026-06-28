@@ -64,13 +64,14 @@ function serializeMetric(metric: string, insight?: Insight) {
 
 async function getAccountMetric(
   metric: string,
+  instagramUserId: string,
   accessToken: string,
   since: number,
   until: number,
 ) {
   try {
     const result = await instagramGet<InsightsResponse>(
-      "me/insights",
+      `${instagramUserId}/insights`,
       accessToken,
       { metric, period: "day", since, until },
     )
@@ -78,7 +79,7 @@ async function getAccountMetric(
   } catch {
     try {
       const result = await instagramGet<InsightsResponse>(
-        "me/insights",
+        `${instagramUserId}/insights`,
         accessToken,
         { metric, period: "day", metric_type: "total_value", since, until },
       )
@@ -90,11 +91,12 @@ async function getAccountMetric(
 }
 
 async function getAllMedia(
+  instagramUserId: string,
   accessToken: string,
   since: number,
 ): Promise<InstagramMedia[]> {
   let page: MediaResponse | null = await instagramGet<MediaResponse>(
-    "me/media",
+    `${instagramUserId}/media`,
     accessToken,
     {
       fields:
@@ -191,11 +193,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const accessToken = await getUsableInstagramToken(connection)
+    const accessToken = getUsableInstagramToken(connection)
     const until = Math.floor(Date.now() / 1000)
     const since = until - days * 86400
     const [profile, metrics, rawMedia] = await Promise.all([
-      getInstagramProfile(accessToken),
+      getInstagramProfile(connection.instagramUserId, accessToken),
       Promise.all(
         [
           "reach",
@@ -205,10 +207,16 @@ export async function GET(request: Request) {
           "accounts_engaged",
           "total_interactions",
         ].map((metric) =>
-          getAccountMetric(metric, accessToken, since, until),
+          getAccountMetric(
+            metric,
+            connection.instagramUserId,
+            accessToken,
+            since,
+            until,
+          ),
         ),
       ),
-      getAllMedia(accessToken, since),
+      getAllMedia(connection.instagramUserId, accessToken, since),
     ])
     const enrichedMedia = await Promise.all(
       rawMedia.slice(0, 36).map((item) => enrichMedia(item, accessToken)),
@@ -241,7 +249,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       profile: {
-        id: profile.user_id || profile.id,
+        id: profile.id,
         username: profile.username,
         name: profile.name || connection.displayName,
         profilePictureUrl:

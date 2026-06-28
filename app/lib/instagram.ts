@@ -4,22 +4,22 @@ import {
   createHash,
   randomBytes,
 } from "node:crypto"
-import { db, now, type InstagramConnectionRecord } from "@/app/lib/db"
+import {
+  createId,
+  db,
+  now,
+  type InstagramConnectionRecord,
+} from "@/app/lib/db"
 
 const GRAPH_VERSION = process.env.INSTAGRAM_GRAPH_VERSION || "v25.0"
-const GRAPH_HOST = "https://graph.instagram.com"
+const GRAPH_HOST = "https://graph.facebook.com"
 
-type InstagramErrorPayload = {
-  error?: {
-    message?: string
-    type?: string
-    code?: number
-  }
+type GraphErrorPayload = {
+  error?: { message?: string; type?: string; code?: number }
 }
 
 export type InstagramProfile = {
   id: string
-  user_id?: string
   username: string
   name?: string
   profile_picture_url?: string
@@ -27,49 +27,49 @@ export type InstagramProfile = {
   media_count?: number
 }
 
+export type ManagedInstagramAccount = InstagramProfile & {
+  facebookPageId: string
+  facebookPageName: string
+  pageAccessToken: string
+}
+
 export function instagramConfig(origin?: string) {
   const appId = process.env.INSTAGRAM_APP_ID || ""
   const appSecret = process.env.INSTAGRAM_APP_SECRET || ""
   const appUrl = (process.env.APP_URL || origin || "").replace(/\/$/, "")
-  const encryptionSecret =
-    process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY || appSecret
+  const encryptionSecret = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY || ""
+  const missing = [
+    !appId && "INSTAGRAM_APP_ID",
+    !appSecret && "INSTAGRAM_APP_SECRET",
+    !encryptionSecret && "INSTAGRAM_TOKEN_ENCRYPTION_KEY",
+    !appUrl && "APP_URL",
+  ].filter(Boolean)
 
-  if (!appId || !appSecret || !appUrl || !encryptionSecret) {
-    throw new Error(
-      "Instagram OAuth is not configured. Add INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_TOKEN_ENCRYPTION_KEY and APP_URL.",
-    )
+  if (missing.length) {
+    throw new Error(`Instagram OAuth is missing: ${missing.join(", ")}.`)
   }
-
   return {
     appId,
     appSecret,
     appUrl,
     redirectUri: `${appUrl}/api/instagram/oauth/callback`,
-    encryptionSecret,
   }
 }
 
 function encryptionKey() {
-  const encryptionSecret =
-    process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY ||
-    process.env.INSTAGRAM_APP_SECRET
-  if (!encryptionSecret) {
-    throw new Error("Instagram token encryption key is not configured.")
-  }
-  return createHash("sha256")
-    .update(encryptionSecret)
-    .digest()
+  const secret = process.env.INSTAGRAM_TOKEN_ENCRYPTION_KEY
+  if (!secret) throw new Error("Instagram token encryption key is missing.")
+  return createHash("sha256").update(secret).digest()
 }
 
-export function encryptInstagramToken(token: string) {
+export function encryptInstagramToken(value: string) {
   const iv = randomBytes(12)
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv)
   const encrypted = Buffer.concat([
-    cipher.update(token, "utf8"),
+    cipher.update(value, "utf8"),
     cipher.final(),
   ])
-  const tag = cipher.getAuthTag()
-  return ["v1", iv, tag, encrypted]
+  return ["v1", iv, cipher.getAuthTag(), encrypted]
     .map((part) =>
       typeof part === "string" ? part : part.toString("base64url"),
     )
@@ -93,17 +93,17 @@ export function decryptInstagramToken(value: string) {
   ]).toString("utf8")
 }
 
-async function instagramRequest<T>(url: URL, accessToken?: string) {
+async function graphRequest<T>(url: URL, accessToken?: string) {
   const response = await fetch(url, {
     headers: accessToken
       ? { Authorization: `Bearer ${accessToken}` }
       : undefined,
     cache: "no-store",
   })
-  const data = (await response.json()) as T & InstagramErrorPayload
+  const data = (await response.json()) as T & GraphErrorPayload
   if (!response.ok || data.error) {
     throw new Error(
-      data.error?.message || `Instagram API request failed (${response.status}).`,
+      data.error?.message || `Meta Graph API failed (${response.status}).`,
     )
   }
   return data as T
@@ -114,103 +114,158 @@ export async function instagramGet<T>(
   accessToken: string,
   params: Record<string, string | number | undefined> = {},
 ) {
-  const normalizedPath = path.replace(/^\//, "")
-  const url = new URL(`${GRAPH_HOST}/${GRAPH_VERSION}/${normalizedPath}`)
+  const url = new URL(
+    `${GRAPH_HOST}/${GRAPH_VERSION}/${path.replace(/^\//, "")}`,
+  )
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined) url.searchParams.set(key, String(value))
   }
-  return instagramRequest<T>(url, accessToken)
+  return graphRequest<T>(url, accessToken)
 }
 
 export async function instagramGetUrl<T>(value: string, accessToken: string) {
   const url = new URL(value)
-  if (url.hostname !== "graph.instagram.com") {
-    throw new Error("Instagram returned an unexpected pagination URL.")
+  if (url.hostname !== "graph.facebook.com") {
+    throw new Error("Meta returned an unexpected pagination URL.")
   }
-  return instagramRequest<T>(url, accessToken)
+  return graphRequest<T>(url, accessToken)
 }
 
-export async function exchangeInstagramCode(code: string, origin: string) {
+export async function exchangeFacebookCode(code: string, origin: string) {
   const config = instagramConfig(origin)
-  const body = new URLSearchParams({
-    client_id: config.appId,
-    client_secret: config.appSecret,
-    grant_type: "authorization_code",
-    redirect_uri: config.redirectUri,
-    code,
-  })
-  const response = await fetch("https://api.instagram.com/oauth/access_token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-    cache: "no-store",
-  })
-  const shortToken = (await response.json()) as InstagramErrorPayload & {
-    access_token?: string
-    user_id?: string | number
-  }
-  if (!response.ok || !shortToken.access_token) {
-    throw new Error(
-      shortToken.error?.message || "Instagram did not return an access token.",
-    )
-  }
-
-  const longTokenUrl = new URL(`${GRAPH_HOST}/access_token`)
-  longTokenUrl.searchParams.set("grant_type", "ig_exchange_token")
-  longTokenUrl.searchParams.set("client_secret", config.appSecret)
-  longTokenUrl.searchParams.set("access_token", shortToken.access_token)
-  const longToken = await instagramRequest<{
+  const tokenUrl = new URL(
+    `${GRAPH_HOST}/${GRAPH_VERSION}/oauth/access_token`,
+  )
+  tokenUrl.searchParams.set("client_id", config.appId)
+  tokenUrl.searchParams.set("client_secret", config.appSecret)
+  tokenUrl.searchParams.set("redirect_uri", config.redirectUri)
+  tokenUrl.searchParams.set("code", code)
+  const shortToken = await graphRequest<{
     access_token: string
-    token_type: string
+    token_type?: string
+    expires_in?: number
+  }>(tokenUrl)
+
+  const longTokenUrl = new URL(
+    `${GRAPH_HOST}/${GRAPH_VERSION}/oauth/access_token`,
+  )
+  longTokenUrl.searchParams.set("grant_type", "fb_exchange_token")
+  longTokenUrl.searchParams.set("client_id", config.appId)
+  longTokenUrl.searchParams.set("client_secret", config.appSecret)
+  longTokenUrl.searchParams.set("fb_exchange_token", shortToken.access_token)
+  const longToken = await graphRequest<{
+    access_token: string
+    token_type?: string
     expires_in?: number
   }>(longTokenUrl)
 
   return {
     accessToken: longToken.access_token,
-    instagramUserId: String(shortToken.user_id || ""),
     expiresAt: longToken.expires_in
       ? new Date(Date.now() + longToken.expires_in * 1000).toISOString()
       : null,
   }
 }
 
-export async function getInstagramProfile(accessToken: string) {
-  return instagramGet<InstagramProfile>("me", accessToken, {
+export async function getManagedInstagramAccounts(userAccessToken: string) {
+  type Page = {
+    id: string
+    name: string
+    access_token: string
+    instagram_business_account?: InstagramProfile
+  }
+  type PagesResponse = { data: Page[]; paging?: { next?: string } }
+  const response = await instagramGet<PagesResponse>(
+    "me/accounts",
+    userAccessToken,
+    {
+      fields:
+        "id,name,access_token,instagram_business_account{id,username,name,profile_picture_url,followers_count,media_count}",
+      limit: 100,
+    },
+  )
+  return response.data
+    .filter(
+      (page): page is Page & { instagram_business_account: InstagramProfile } =>
+        Boolean(page.instagram_business_account?.id),
+    )
+    .map((page) => ({
+      ...page.instagram_business_account,
+      facebookPageId: page.id,
+      facebookPageName: page.name,
+      pageAccessToken: page.access_token,
+    }))
+}
+
+export async function getInstagramProfile(
+  instagramUserId: string,
+  accessToken: string,
+) {
+  return instagramGet<InstagramProfile>(instagramUserId, accessToken, {
     fields:
-      "id,user_id,username,name,profile_picture_url,followers_count,media_count",
+      "id,username,name,profile_picture_url,followers_count,media_count",
   })
 }
 
-export async function getUsableInstagramToken(
+export function getUsableInstagramToken(
   connection: InstagramConnectionRecord,
 ) {
-  const accessToken = decryptInstagramToken(connection.accessTokenEncrypted)
-  const expiresAt = connection.tokenExpiresAt
-    ? new Date(connection.tokenExpiresAt).getTime()
-    : null
+  if (
+    connection.tokenExpiresAt &&
+    new Date(connection.tokenExpiresAt).getTime() <= Date.now()
+  ) {
+    throw new Error("Meta access token expired. Reconnect Instagram.")
+  }
+  return decryptInstagramToken(connection.accessTokenEncrypted)
+}
 
-  if (!expiresAt || expiresAt - Date.now() > 7 * 86400000) return accessToken
+export function saveInstagramConnection(input: {
+  userId: string
+  wavespeedModelId: string
+  account: ManagedInstagramAccount
+  tokenExpiresAt: string | null
+}) {
+  const { userId, wavespeedModelId, account, tokenExpiresAt } = input
+  const existing = db
+    .prepare(
+      `SELECT * FROM instagram_connections
+       WHERE userId = ? AND (wavespeedModelId = ? OR instagramUserId = ?)
+       ORDER BY updatedAt DESC LIMIT 1`,
+    )
+    .get(userId, wavespeedModelId, account.id) as
+    | InstagramConnectionRecord
+    | undefined
+  const timestamp = now()
 
-  const refreshUrl = new URL(`${GRAPH_HOST}/refresh_access_token`)
-  refreshUrl.searchParams.set("grant_type", "ig_refresh_token")
-  refreshUrl.searchParams.set("access_token", accessToken)
-  const refreshed = await instagramRequest<{
-    access_token: string
-    expires_in?: number
-  }>(refreshUrl)
-  const nextExpiry = refreshed.expires_in
-    ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
-    : connection.tokenExpiresAt
-
-  db.prepare(
-    `UPDATE instagram_connections
-     SET accessTokenEncrypted = ?, tokenExpiresAt = ?, updatedAt = ?
-     WHERE id = ?`,
-  ).run(
-    encryptInstagramToken(refreshed.access_token),
-    nextExpiry,
-    now(),
-    connection.id,
-  )
-  return refreshed.access_token
+  db.exec("BEGIN IMMEDIATE;")
+  try {
+    db.prepare(
+      `DELETE FROM instagram_connections
+       WHERE userId = ? AND (wavespeedModelId = ? OR instagramUserId = ?)`,
+    ).run(userId, wavespeedModelId, account.id)
+    db.prepare(
+      `INSERT INTO instagram_connections
+       (id, userId, wavespeedModelId, instagramUserId, facebookPageId,
+        username, displayName, profilePictureUrl, accessTokenEncrypted,
+        tokenExpiresAt, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      existing?.id || createId(),
+      userId,
+      wavespeedModelId,
+      account.id,
+      account.facebookPageId,
+      account.username,
+      account.name || null,
+      account.profile_picture_url || null,
+      encryptInstagramToken(account.pageAccessToken),
+      tokenExpiresAt,
+      existing?.createdAt || timestamp,
+      timestamp,
+    )
+    db.exec("COMMIT;")
+  } catch (error) {
+    db.exec("ROLLBACK;")
+    throw error
+  }
 }
